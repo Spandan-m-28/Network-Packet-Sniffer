@@ -6,6 +6,7 @@
 #include<pcap.h>
 #include <netinet/in.h>
 #include <ctype.h>
+#include <string.h>
 
 #define ETHER_ADDR_LEN 6
 #define SIZE_ETHERNET 14
@@ -95,6 +96,50 @@ void print_http_payload(const unsigned char *payload, int payload_len){
     }
     printf("\n");
 }
+
+void buildFilter(char *filter, size_t size, const Config *cfg) {
+    filter[0] = '\0';
+
+    // Protocol filters
+    if (cfg->icmp) {
+        strncat(filter, "icmp or icmp6", size - strlen(filter) - 1);
+    } 
+    else if (cfg->tcp) {
+        strncat(filter, "tcp", size - strlen(filter) - 1);
+    } 
+    else if (cfg->udp) {
+        strncat(filter, "udp", size - strlen(filter) - 1);
+    }
+
+    // Port filter
+    if (cfg->port > 0) {
+        if (filter[0] != '\0')
+            strncat(filter, " and ", size - strlen(filter) - 1);
+
+        char portbuf[32];
+        snprintf(portbuf, sizeof(portbuf), "port %d", cfg->port);
+        strncat(filter, portbuf, size - strlen(filter) - 1);
+    }
+
+    // Source IP
+    if (cfg->src_ip[0]) {
+        if (filter[0] != '\0')
+            strncat(filter, " and ", size - strlen(filter) - 1);
+
+        strncat(filter, "src host ", size - strlen(filter) - 1);
+        strncat(filter, cfg->src_ip, size - strlen(filter) - 1);
+    }
+
+    // Destination IP
+    if (cfg->dst_ip[0]) {
+        if (filter[0] != '\0')
+            strncat(filter, " and ", size - strlen(filter) - 1);
+
+        strncat(filter, "dst host ", size - strlen(filter) - 1);
+        strncat(filter, cfg->dst_ip, size - strlen(filter) - 1);
+    }
+}
+
 
 void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsigned char *packet){
     const struct sniff_ethernet *ethernet;
@@ -329,29 +374,32 @@ int startCapture(Config *cfg){
         mask = 0;
     }
 
-    if(cfg->noArg != 1){
-        // Compiling filter
-        struct bpf_program fp;
-        char filter_exp[] = "icmp or icmp6";
-        if(pcap_compile(handle,&fp,filter_exp,1,mask) == -1){
-            fprintf(stderr,"Not able to parse the given filter %s : %s\n",filter_exp,pcap_geterr(handle));
-            return 2;
-        }  
+    char filter_exp[256];
+    buildFilter(filter_exp, sizeof(filter_exp), cfg);
 
-        // Applying filter
-        if(pcap_setfilter(handle,&fp) == -1){
-            fprintf(stderr,"Not able to apply filter %s : %s\n",filter_exp,pcap_geterr(handle));
+    if (filter_exp[0] != '\0') {
+        struct bpf_program fp;
+
+        if (pcap_compile(handle, &fp, filter_exp, 1, mask) == -1) {
+            fprintf(stderr, "Invalid filter '%s': %s\n",
+                    filter_exp, pcap_geterr(handle));
             return 2;
         }
-    }
 
-    printf("ok till here\n");
+        if (pcap_setfilter(handle, &fp) == -1) {
+            fprintf(stderr, "Failed to apply filter '%s': %s\n",
+                    filter_exp, pcap_geterr(handle));
+            return 2;
+        }
+
+        pcap_freecode(&fp);
+    }
     
     // Grabbing a packet
     struct pcap_pkthdr header; // The header that pcap gives us
     const unsigned char *packet; // the actual packet
 
-    pcap_loop(handle,-1,got_packet,NULL);
+    pcap_loop(handle,cfg->packet_limit,got_packet,NULL);
 
     pcap_close(handle);
 
