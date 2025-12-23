@@ -19,7 +19,7 @@ void printHelp(){
         "   --icmp              Captures only ICMP packets\n"
         "   --port <number>     Filters packets by port number\n"
         "   --src_ip <ip>       Filters packets by given source IP\n"
-        "   --dest_ip <ip>      Filters packets by given destination IP\n"
+        "   --dst_ip <ip>       Filters packets by given destination IP\n"
         "   --stats             Displays traffic statistics\n"
         "   --count <number>    Stops capturing packets after n packets\n\n"
 
