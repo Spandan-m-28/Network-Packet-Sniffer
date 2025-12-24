@@ -170,17 +170,17 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
     // Print the info about the ethernet header
     printf("\n....Ethernet Header....\n");
 
-    printf("Source Mac : ");
+    printf("    Source Mac : ");
     print_mac(ethernet->ether_shost);
     printf("\n");
 
-    printf("Destination Mac : ");
+    printf("    Destination Mac : ");
     print_mac(ethernet->ether_dhost);
     printf("\n");
 
     unsigned short type = ntohs(ethernet->ether_type);
 
-    printf("Ethernet type : 0x%04x",type);
+    printf("    Ethernet type : 0x%04x",type);
 
     if (type == 0x0800)
         printf(" (IPv4)");
@@ -192,7 +192,7 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
         printf(" (Unknown)");
 
     printf("\n");
-    
+
     // Count non-IPv4 packets first
     if (type == ETHERTYPE_ARP || type == ETHERTYPE_IPV6) {
         g_stats.otherPackets++;
@@ -205,7 +205,7 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
         return;
     }
 
-    printf("Captured Length : %d bytes\n", header->caplen);
+    printf("    Captured Length : %d bytes\n", header->caplen);
 
     // Now information related to ip headers
     const struct sniff_ip *ip;
@@ -221,11 +221,11 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
 
     printf("...IP Header...\n");
 
-    printf("Version: %d\n",IP_V(ip));
-    printf("Header Length: %d\n",size_ip);
-    printf("TTL: %d\n",ip->ip_ttl);
+    printf("    Version: %d\n",IP_V(ip));
+    printf("    Header Length: %d\n",size_ip);
+    printf("    TTL: %d\n",ip->ip_ttl);
 
-    printf("Protocol: ");
+    printf("    Protocol: ");
     switch (ip->ip_p) {
         case 1:  printf("ICMP\n"); break;
         case 6:  printf("TCP\n");  break;
@@ -233,8 +233,8 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
         default: printf("Other (%d)\n", ip->ip_p);
     }
 
-    printf("Source IP      : %s\n", inet_ntoa(ip->ip_src));
-    printf("Destination IP : %s\n", inet_ntoa(ip->ip_dst));
+    printf("    Source IP      : %s\n", inet_ntoa(ip->ip_src));
+    printf("    Destination IP : %s\n", inet_ntoa(ip->ip_dst));
 
     switch (ip->ip_p){
         case 1:
@@ -255,13 +255,13 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
             }
 
             printf("...TCP Header...\n");
-            printf("Source Port: %u\n",ntohs(tcp->th_sport));
-            printf("Destination Port: %u\n",ntohs(tcp->th_dport));
-            printf("Sequence number: %u\n",ntohl(tcp->th_seq));
-            printf("Acknowledgement number: %u\n",ntohl(tcp->th_ack));
-            printf("Header length: %u\n",size_tcp);
+            printf("    Source Port: %u\n",ntohs(tcp->th_sport));
+            printf("    Destination Port: %u\n",ntohs(tcp->th_dport));
+            printf("    Sequence number: %u\n",ntohl(tcp->th_seq));
+            printf("    Acknowledgement number: %u\n",ntohl(tcp->th_ack));
+            printf("    Header length: %u\n",size_tcp);
 
-            printf("Flags: ");
+            printf("    Flags: ");
             if (tcp->th_flags & 0x02) printf("SYN ");
             if (tcp->th_flags & 0x10) printf("ACK ");
             if (tcp->th_flags & 0x01) printf("FIN ");
@@ -272,9 +272,9 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
 
             int payload_len = header->caplen - (SIZE_ETHERNET + size_ip + size_tcp);
             if (payload_len > 0) {
-                printf("Payload Length   : %d bytes\n", payload_len);
+                printf("    Payload Length   : %d bytes\n", payload_len);
             }else{
-                printf("No TCP Payload \n");
+                printf("    No TCP Payload \n");
             }
 
             break;
@@ -287,9 +287,9 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
             udp = (struct sniff_udp *)(packet + SIZE_ETHERNET + size_ip);
 
             printf("...UDP Header...\n");
-            printf("Source Port : %u\n",ntohs(udp->uh_sport));
-            printf("Destination Port : %u\n",ntohs(udp->uh_dport));
-            printf("Length : %u\n",ntohs(udp->uh_len));
+            printf("    Source Port : %u\n",ntohs(udp->uh_sport));
+            printf("    Destination Port : %u\n",ntohs(udp->uh_dport));
+            printf("    Length : %u\n",ntohs(udp->uh_len));
 
             // If it is a dns packet then decoding the dns header
             if(ntohs(udp->uh_sport) == 53 || ntohs(udp->uh_dport) == 53){
@@ -310,33 +310,33 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
 
                 int is_response = flags & 0x8000; // 1 = response, 0 = query
                 if (is_response)
-                    printf("DNS Response\n");
+                    printf("    DNS Response\n");
                 else
-                    printf("DNS Query\n");
+                    printf("    DNS Query\n");
 
                 const unsigned char *dns_payload = packet + SIZE_ETHERNET + size_ip + sizeof(struct sniff_udp) + sizeof(struct sniff_dns);
 
                 int offset = 0;
 
-                printf("Domain Name: ");
+                printf("    Domain Name: ");
                 decode_dns_name(dns_payload, &offset);
                 printf("\n");
 
                 int payload_len = ntohs(udp->uh_len) - sizeof(struct sniff_udp);
 
                 if (payload_len > 0) {
-                    printf("UDP Payload Length : %d bytes\n", payload_len);
+                    printf("    UDP Payload Length : %d bytes\n", payload_len);
                 } else {
-                    printf("No UDP payload\n");
+                    printf("    No UDP payload\n");
                 }
 
             }else{
                 int payload_len = ntohs(udp->uh_len) - sizeof(struct sniff_udp);
 
                 if (payload_len > 0) {
-                    printf("UDP Payload Length : %d bytes\n", payload_len);
+                    printf("    UDP Payload Length : %d bytes\n", payload_len);
                 } else {
-                    printf("No UDP payload\n");
+                    printf("    No UDP payload\n");
                 }
             }
 
@@ -344,12 +344,17 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
             
         default:
             g_stats.otherPackets++;
-            printf("not a tcp or udp packet\n");
+            printf("    not a tcp or udp packet\n");
             break;
     }
 }
 
 int startCapture(Config *cfg){
+    if(cfg->stats == 1){
+        printStats(&g_stats);
+        return 0;
+    }
+
     // Initializing stats to count packets
     initializeStats(&g_stats);
 
@@ -436,7 +441,7 @@ int startCapture(Config *cfg){
 
     pcap_loop(g_handle,cfg->packet_limit,got_packet,NULL);
 
-    printf("\n\n=== Capture stopped ===\n");
+    printf("\n\n... Capture stopped ...\n");
     printStats(&g_stats);
 
     pcap_close(g_handle);
