@@ -7,9 +7,15 @@
 #include <netinet/in.h>
 #include <ctype.h>
 #include <string.h>
+#include "stats.h"
+#include <signal.h>
 
 #define ETHER_ADDR_LEN 6
 #define SIZE_ETHERNET 14
+
+#define ETHERTYPE_IP   0x0800
+#define ETHERTYPE_ARP  0x0806
+#define ETHERTYPE_IPV6 0x86DD
 
 // These definations are for ip header parsing
 #define IP_V(ip) (((ip)->ip_vhl) >> 4)
@@ -17,6 +23,10 @@
 
 // Thes defination is used to calculate the the header length of the tcp packet
 #define TH_OFF(th) (((th)->th_offx2 & 0xF0) >> 4)
+
+// Defining global varibles for the access
+static Stats g_stats;
+static pcap_t *g_handle = NULL;
 
 struct sniff_ethernet {
     unsigned char ether_dhost[ETHER_ADDR_LEN]; /* Destination MAC */
@@ -140,8 +150,19 @@ void buildFilter(char *filter, size_t size, const Config *cfg) {
     }
 }
 
+void handle_sigint(int sig) {
+    (void)sig;
+    if (g_handle) {
+        pcap_breakloop(g_handle);
+    }
+}
 
 void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsigned char *packet){
+    (void)args; 
+
+    //Incrementing Packet count
+    g_stats.totalPackets++;
+
     const struct sniff_ethernet *ethernet;
 
     ethernet = (struct sniff_ethernet *)packet;
@@ -171,6 +192,18 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
         printf(" (Unknown)");
 
     printf("\n");
+    
+    // Count non-IPv4 packets first
+    if (type == ETHERTYPE_ARP || type == ETHERTYPE_IPV6) {
+        g_stats.otherPackets++;
+        return;
+    }
+
+    // Only IPv4 packets continue
+    if (type != ETHERTYPE_IP) {
+        g_stats.otherPackets++;
+        return;
+    }
 
     printf("Captured Length : %d bytes\n", header->caplen);
 
@@ -204,7 +237,12 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
     printf("Destination IP : %s\n", inet_ntoa(ip->ip_dst));
 
     switch (ip->ip_p){
+        case 1:
+            g_stats.icmpPackets++;
+            break;
         case 6:
+            //Adding value to stats
+            g_stats.tcpPackets++;
             // If it is a tcp packet
             const struct sniff_tcp *tcp;
             unsigned int size_tcp;
@@ -232,19 +270,18 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
             if (tcp->th_flags & 0x20) printf("URG ");
             printf("\n");
 
-            const unsigned char *payload;
-            payload = packet + SIZE_ETHERNET + size_ip + size_tcp;
-
             int payload_len = header->caplen - (SIZE_ETHERNET + size_ip + size_tcp);
             if (payload_len > 0) {
                 printf("Payload Length   : %d bytes\n", payload_len);
             }else{
-                printf("Invalid payload \n");
+                printf("No TCP Payload \n");
             }
 
             break;
 
         case 17:
+            // Adding value to stats
+            g_stats.udpPackets++;
             // If it is a udp packet
             const struct sniff_udp *udp;
             udp = (struct sniff_udp *)(packet + SIZE_ETHERNET + size_ip);
@@ -285,9 +322,6 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
                 decode_dns_name(dns_payload, &offset);
                 printf("\n");
 
-                // Decoding dns payload it it contans 
-                const unsigned char *payload = packet + SIZE_ETHERNET + size_ip + sizeof(struct sniff_udp);
-
                 int payload_len = ntohs(udp->uh_len) - sizeof(struct sniff_udp);
 
                 if (payload_len > 0) {
@@ -309,11 +343,16 @@ void got_packet(unsigned char *args,const struct pcap_pkthdr *header,const unsig
             break;
             
         default:
+            g_stats.otherPackets++;
             printf("not a tcp or udp packet\n");
+            break;
     }
 }
 
 int startCapture(Config *cfg){
+    // Initializing stats to count packets
+    initializeStats(&g_stats);
+
     pcap_if_t *alldevs, *d;
     char errbuf[PCAP_ERRBUF_SIZE];
     int i = 0;
@@ -348,20 +387,18 @@ int startCapture(Config *cfg){
     dev = d->name;
     printf("Your choice is %s\n",dev);
 
-    pcap_t *handle;
-
     // Creating a session
-    handle = pcap_open_live(dev,BUFSIZ,1,1000,errbuf);
-    if(handle == NULL){
+    g_handle = pcap_open_live(dev,BUFSIZ,1,1000,errbuf);
+    if(g_handle == NULL){
         fprintf(stderr,"Error opening network device %s : %s \n",dev,errbuf);
         return 1;
     }
 
     printf("Opened %s successfully \n",dev);
 
-    if(pcap_datalink(handle) != DLT_EN10MB){
+    if(pcap_datalink(g_handle) != DLT_EN10MB){
         fprintf(stderr,"Device:%s doesn't support ethernet headers",dev);
-        pcap_close(handle);
+        pcap_close(g_handle);
         return 2;
     }
 
@@ -380,28 +417,30 @@ int startCapture(Config *cfg){
     if (filter_exp[0] != '\0') {
         struct bpf_program fp;
 
-        if (pcap_compile(handle, &fp, filter_exp, 1, mask) == -1) {
+        if (pcap_compile(g_handle, &fp, filter_exp, 1, mask) == -1) {
             fprintf(stderr, "Invalid filter '%s': %s\n",
-                    filter_exp, pcap_geterr(handle));
+                    filter_exp, pcap_geterr(g_handle));
             return 2;
         }
 
-        if (pcap_setfilter(handle, &fp) == -1) {
+        if (pcap_setfilter(g_handle, &fp) == -1) {
             fprintf(stderr, "Failed to apply filter '%s': %s\n",
-                    filter_exp, pcap_geterr(handle));
+                    filter_exp, pcap_geterr(g_handle));
             return 2;
         }
 
         pcap_freecode(&fp);
     }
-    
-    // Grabbing a packet
-    struct pcap_pkthdr header; // The header that pcap gives us
-    const unsigned char *packet; // the actual packet
 
-    pcap_loop(handle,cfg->packet_limit,got_packet,NULL);
+    signal(SIGINT, handle_sigint);
 
-    pcap_close(handle);
+    pcap_loop(g_handle,cfg->packet_limit,got_packet,NULL);
+
+    printf("\n\n=== Capture stopped ===\n");
+    printStats(&g_stats);
+
+    pcap_close(g_handle);
+    g_handle = NULL;
 
     return 0;
 }
